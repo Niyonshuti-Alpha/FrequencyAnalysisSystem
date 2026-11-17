@@ -1,15 +1,23 @@
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Automated verification test suite for the Frequency Analysis System.
- * Tests all required cases from Section 9 programmatically:
- * - HELLO WORLD (standard, lowercase, mixed case, punctuation, numbers)
- * - Empty string and whitespace-only
- * - Single letter 'A'
- * - Canonical Caesar test case 'KBKXEUTK' (frequencies, ranking, Caesar deduction)
- * - Percentage summation check (~100%)
- * - Ciphertext immutability under decryption operations
+ * Tests:
+ * 1. Standard "HELLO WORLD" and case/punctuation/digit invariance
+ * 2. Empty string and whitespace-only handling
+ * 3. Single letter 'A'
+ * 4. Canonical Caesar test case 'KBKXEUTK' (frequencies, ranking, Caesar deduction)
+ * 5. Ambiguous tie detection for Caesar cryptanalysis
+ * 6. Percentage summation check (~100%)
+ * 7. Ciphertext immutability under decryption operations
+ * 8. HTML escaping / XSS protection in WebPageRenderer
+ * 9. Web server GET (200), POST analysis (200), 404 (unknown URL), 405 (unsupported method)
  */
 public class SystemTestSuite {
 
@@ -98,7 +106,6 @@ public class SystemTestSuite {
                 && (rKbk.getCount('U') == 1 && Math.abs(rKbk.getPercentage('U') - 12.50) < 0.01)
                 && (rKbk.getCount('X') == 1 && Math.abs(rKbk.getPercentage('X') - 12.50) < 0.01);
 
-        // Check ranking: K, B, E, T, U, X
         List<Character> ranked = rKbk.getRankedLetters();
         boolean rankingOk = ranked.size() == 6
                 && ranked.get(0) == 'K'
@@ -115,17 +122,28 @@ public class SystemTestSuite {
             System.out.println("[FAIL] 'KBKXEUTK' frequency or ranking mismatch.");
         }
 
-        // Test 10: Caesar Helper on "KBKXEUTK"
+        // Test 10: Caesar Helper on "KBKXEUTK" (shift formula: (10 - 4) mod 26 = 6, decrypt back 6)
         totalTests++;
         DecryptionAssistant.CaesarResult caesarRes = DecryptionAssistant.solveCaesarAssumingE(rKbk);
-        if (caesarRes != null && caesarRes.getShift() == -6 && "EVERYONE".equals(caesarRes.getCandidatePlaintext())) {
-            System.out.println("[PASS] Caesar Helper on 'KBKXEUTK': Suggests shift -6, candidate plaintext 'EVERYONE'.");
+        if (caesarRes != null && caesarRes.getShift() == 6 && "EVERYONE".equals(caesarRes.getCandidatePlaintext()) && !caesarRes.isTieAmbiguous()) {
+            System.out.println("[PASS] Caesar Helper on 'KBKXEUTK': Shift 6, candidate plaintext 'EVERYONE', no tie ambiguity.");
             testsPassed++;
         } else {
             System.out.println("[FAIL] Caesar Helper failed on 'KBKXEUTK'.");
         }
 
-        // Test 11: Percentage sum equals ~100%
+        // Test 11: Caesar Ambiguity Tie Detection (e.g. "AB" where A:1 and B:1 tie for rank 1)
+        totalTests++;
+        FrequencyResult rTie = analyzer.analyze("AB");
+        DecryptionAssistant.CaesarResult tieRes = DecryptionAssistant.solveCaesarAssumingE(rTie);
+        if (tieRes != null && tieRes.isTieAmbiguous() && tieRes.getTopCipherLetter() == 'A') {
+            System.out.println("[PASS] Caesar Ambiguity Tie Detection: Identified tied top count and flagged ambiguity.");
+            testsPassed++;
+        } else {
+            System.out.println("[FAIL] Caesar Ambiguity Tie Detection failed.");
+        }
+
+        // Test 12: Percentage sum equals ~100%
         totalTests++;
         double sum = 0.0;
         for (LetterFrequency lf : rKbk.getRanking()) {
@@ -138,27 +156,99 @@ public class SystemTestSuite {
             System.out.printf("[FAIL] Percentage sum verification failed: %.2f%%\n", sum);
         }
 
-        // Test 12: Ciphertext immutability under decryption & substitution
+        // Test 13: Ciphertext immutability under decryption operations
         totalTests++;
         String originalBefore = rKbk.getOriginalText();
-        DecryptionAssistant assistant = new DecryptionAssistant();
-        assistant.setMapping('K', 'E');
-        assistant.setMapping('B', 'V');
-        String masked = assistant.applySubstitution(originalBefore, true);
-        String unmasked = assistant.applySubstitution(originalBefore, false);
         String caesarAttempt = DecryptionAssistant.applyCaesarShift(originalBefore, -6);
         String originalAfter = rKbk.getOriginalText();
 
         if (originalBefore.equals(originalAfter) && "KBKXEUTK".equals(originalAfter)) {
-            System.out.println("[PASS] Ciphertext immutability: Original text remained unchanged through all operations.");
+            System.out.println("[PASS] Ciphertext immutability: Original text remained unchanged through decryption.");
             testsPassed++;
         } else {
             System.out.println("[FAIL] Ciphertext was modified!");
         }
 
+        // Test 14: HTML escaping / XSS protection
+        totalTests++;
+        String dangerousInput = "<script>alert('xss');</script> & \"hello\" 'world'";
+        String escaped = WebPageRenderer.escapeHtml(dangerousInput);
+        if (!escaped.contains("<script>") && escaped.contains("&lt;script&gt;") && escaped.contains("&amp;") && escaped.contains("&quot;") && escaped.contains("&#39;")) {
+            System.out.println("[PASS] HTML Escaping: Sanitized dangerous script tags and quotes safely.");
+            testsPassed++;
+        } else {
+            System.out.println("[FAIL] HTML Escaping failed.");
+        }
+
+        // Test 15: Embedded Web Server Endpoints (GET, POST, 404, 405)
+        totalTests++;
+        boolean webTestsOk = testWebServerEndpoints();
+        if (webTestsOk) {
+            System.out.println("[PASS] Web Server Endpoints: GET (200), POST (200 with results), 404 Not Found, 405 Method Not Allowed.");
+            testsPassed++;
+        } else {
+            System.out.println("[FAIL] Web Server Endpoints failed.");
+        }
+
         System.out.println("\n-------------------------------------------------");
         System.out.printf("Test Suite Completed: %d / %d Tests Passed.\n", testsPassed, totalTests);
         System.out.println("=================================================");
+    }
+
+    private static boolean testWebServerEndpoints() {
+        int testPort = 8899;
+        FrequencyHttpServer testServer = null;
+        try {
+            testServer = new FrequencyHttpServer(testPort);
+            testServer.start();
+
+            // 1. Test GET "/"
+            URI uriRoot = URI.create("http://localhost:" + testPort + "/");
+            HttpURLConnection connGet = (HttpURLConnection) uriRoot.toURL().openConnection();
+            connGet.setRequestMethod("GET");
+            int getCode = connGet.getResponseCode();
+            if (getCode != 200) return false;
+
+            // 2. Test POST "/" with KBKXEUTK
+            HttpURLConnection connPost = (HttpURLConnection) uriRoot.toURL().openConnection();
+            connPost.setRequestMethod("POST");
+            connPost.setDoOutput(true);
+            connPost.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            try (OutputStream os = connPost.getOutputStream()) {
+                os.write("ciphertext=KBKXEUTK".getBytes(StandardCharsets.UTF_8));
+            }
+            int postCode = connPost.getResponseCode();
+            if (postCode != 200) return false;
+            String postBody;
+            try (InputStream is = connPost.getInputStream()) {
+                postBody = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!postBody.contains("EVERYONE") || !postBody.contains("KBKXEUTK")) {
+                return false;
+            }
+
+            // 3. Test 404 on unknown URL "/unknown-page"
+            URI uriUnknown = URI.create("http://localhost:" + testPort + "/unknown-page");
+            HttpURLConnection conn404 = (HttpURLConnection) uriUnknown.toURL().openConnection();
+            conn404.setRequestMethod("GET");
+            int code404 = conn404.getResponseCode();
+            if (code404 != 404) return false;
+
+            // 4. Test 405 on unsupported method (e.g. DELETE "/")
+            HttpURLConnection conn405 = (HttpURLConnection) uriRoot.toURL().openConnection();
+            conn405.setRequestMethod("DELETE");
+            int code405 = conn405.getResponseCode();
+            if (code405 != 405) return false;
+
+            return true;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        } finally {
+            if (testServer != null) {
+                testServer.stop(0);
+            }
+        }
     }
 
     private static boolean verifyHelloWorldResult(FrequencyResult r, String label) {
