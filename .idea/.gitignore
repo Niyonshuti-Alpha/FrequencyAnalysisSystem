@@ -1,0 +1,10 @@
+# Default ignored files
+/../../FrequencyAnalysisSystem./.idea/shelf/
+/../../FrequencyAnalysisSystem./.idea/workspace.xml
+# Editor-based HTTP Client requests
+/../../FrequencyAnalysisSystem./.idea/httpRequests/
+# Ignored default folder with query files
+/../../FrequencyAnalysisSystem./.idea/queries/
+# Datasource local storage ignored files
+/../../FrequencyAnalysisSystem./.idea/dataSources/
+/../../FrequencyAnalysisSystem./.idea/dataSources.local.xml
